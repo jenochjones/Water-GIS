@@ -63,3 +63,5 @@ def load_inp_file(self):
     initialize_map(self)
 
     self.statusBar().showMessage(f"{open_file_path} loaded.")
+
+

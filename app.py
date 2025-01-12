@@ -1,16 +1,37 @@
 import sys
-import io
+
 from PyQt5.QtWidgets import (
     QApplication, QMainWindow, QPushButton, QDockWidget,
-    QVBoxLayout, QWidget, QGraphicsView, QToolBar
+    QVBoxLayout, QWidget, QToolBar, QLabel, QLineEdit, 
+    QDialogButtonBox, QDialog
 )
 from PyQt5.QtGui import QIcon
 from PyQt5.QtCore import Qt, QSize
 from PyQt5.QtWebEngineWidgets import QWebEngineView
-from PyQt5.QtCore import QUrl
 
 from file_toolbar import (create_new_project, load_inp_file)
-from map import initialize_map
+from map import (initialize_map, is_valid_epsg)
+
+
+class EPSGPopup(QDialog):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Set Coordinate Reference System")
+        
+        # Create layout and widgets
+        layout = QVBoxLayout(self)
+        label = QLabel("EPSG Code:")
+        self.text_input = QLineEdit(self)
+        button_box = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel, self)
+        
+        # Add widgets to layout
+        layout.addWidget(label)
+        layout.addWidget(self.text_input)
+        layout.addWidget(button_box)
+        
+        # Connect buttons
+        button_box.accepted.connect(self.accept)
+        button_box.rejected.connect(self.reject)
 
 
 class WaterGIS(QMainWindow):
@@ -65,6 +86,7 @@ class WaterGIS(QMainWindow):
         # Set CRS Button
         set_crs_btn = QPushButton(QIcon("icons/crs.png"), "", self)
         set_crs_btn.setIconSize(QSize(35, 35))
+        set_crs_btn.clicked.connect(lambda: open_epsg_popup(self))
         top_run_toolbar.addWidget(set_crs_btn)
 
         # Run Model Button
@@ -111,6 +133,18 @@ class WaterGIS(QMainWindow):
 
         # Set the style to match EPANET
         self.setStyleSheet(self.waterGIS_style())
+
+        def open_epsg_popup(self):
+            # Create and show the popup dialog
+            popup = EPSGPopup(self)
+            if popup.exec_() == QDialog.Accepted:
+                epsg_code = popup.text_input.text()
+                if is_valid_epsg(epsg_code):
+                    self.crs = epsg_code
+                else:
+                    self.statusBar().showMessage("EPSG Code is not valid.")
+            else:
+                self.statusBar().showMessage("CRS Canceled.")
 
 
     def waterGIS_style(self):
