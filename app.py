@@ -1,17 +1,34 @@
 import sys
+import io
 from PyQt5.QtWidgets import (
     QApplication, QMainWindow, QPushButton, QDockWidget,
     QVBoxLayout, QWidget, QGraphicsView, QToolBar
 )
 from PyQt5.QtGui import QIcon
 from PyQt5.QtCore import Qt, QSize
+from PyQt5.QtWebEngineWidgets import QWebEngineView
+from PyQt5.QtCore import QUrl
 
-from file_toolbar import create_new_project
+from file_toolbar import (create_new_project, load_inp_file)
+from map import initialize_map
 
-class EpanetStyleApp(QMainWindow):
+
+class WaterGIS(QMainWindow):
     def __init__(self):
         super().__init__()
         self.init_ui()
+
+        self.saved = False
+        self.model_gis = {}
+        self.project = None
+
+        self.crs = None
+        
+        self.pipes = None
+        self.junctions = None
+        self.tanks = None
+        self.valves = None
+        self.reservoirs = None
 
     def init_ui(self):
         self.setWindowTitle("WATER-GIS")
@@ -32,6 +49,7 @@ class EpanetStyleApp(QMainWindow):
         open_btn = QPushButton(QIcon("icons/open.png"), "", self)
         open_btn.setShortcut("Ctrl+O")
         open_btn.setIconSize(QSize(35, 35))
+        open_btn.clicked.connect(lambda: load_inp_file(self))
         top_file_toolbar.addWidget(open_btn)
 
         # Save Project Button
@@ -47,7 +65,7 @@ class EpanetStyleApp(QMainWindow):
         # Set CRS Button
         set_crs_btn = QPushButton(QIcon("icons/crs.png"), "", self)
         set_crs_btn.setIconSize(QSize(35, 35))
-        top_run_toolbar.addWidget(set_crs_btn) 
+        top_run_toolbar.addWidget(set_crs_btn)
 
         # Run Model Button
         run_model_btn = QPushButton(QIcon("icons/run.png"), "", self)
@@ -76,9 +94,9 @@ class EpanetStyleApp(QMainWindow):
         # Status bar
         self.statusBar().showMessage("Ready")
 
-        # Central graphics view (map area)
-        self.graphics_view = QGraphicsView()
-        self.setCentralWidget(self.graphics_view)
+        # Central widget (map area)
+        self.map_view = QWebEngineView()
+        self.setCentralWidget(self.map_view)
 
         # Dock widget for tools
         self.tools_dock = QDockWidget("Model Explorer", self)
@@ -92,9 +110,10 @@ class EpanetStyleApp(QMainWindow):
         self.addDockWidget(Qt.RightDockWidgetArea, self.tools_dock)
 
         # Set the style to match EPANET
-        self.setStyleSheet(self.epanet_style())
+        self.setStyleSheet(self.waterGIS_style())
 
-    def epanet_style(self):
+
+    def waterGIS_style(self):
         return (
             "QMainWindow { background-color: #f0f0f0; color: white; }"
             "QMenuBar { background-color: #e0e0e0; border: 1px solid #a0a0a0; }"
@@ -103,12 +122,12 @@ class EpanetStyleApp(QMainWindow):
             "QStatusBar { background-color: #e0e0e0; border: 1px solid #a0a0a0; color: black; }"
             "QDockWidget { background-color: #ffffff; border: 1px solid #a0a0a0; color: black; }"
             "QTreeWidget { background-color: #ffffff; border: 1px solid #a0a0a0; }"
-            "QPushButton { padding: 0; background: transparent; }" 
+            "QPushButton { padding: 0; background: transparent; }"
             "QPushButton:hover { background-color: #d0d0d0 }"
         )
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)
-    window = EpanetStyleApp()
+    window = WaterGIS()
     window.show()
     sys.exit(app.exec_())

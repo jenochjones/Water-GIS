@@ -1,6 +1,11 @@
 from PyQt5.QtWidgets import QFileDialog
+from wntr.network import to_gis
+from wntr.epanet import io as epanet_io
+from wntr.network import io as network_io
 import ctypes
 import os
+
+from  map import initialize_map
 
 
 def create_new_project(self):
@@ -38,3 +43,23 @@ def create_new_project(self):
         # If an error occurs, show a message box
         self.statusBar().showMessage(f"Failed to create the project: {str(e)}")
     
+
+def load_inp_file(self):
+    open_file_path, _ = QFileDialog.getOpenFileName(self, "Select an inp File", "", "EPANET Input Files (*.inp)")
+    inp = epanet_io.InpFile()
+    self.project = inp.read(open_file_path)
+    inp = epanet_io.InpFile()
+    gis = network_io.to_gis(self.project)
+    
+    if self.crs:
+        gis.set_crs(self.crs)
+
+    self.pipes = gis.pipes
+    self.junctions = gis.junctions
+    self.tanks = gis.tanks
+    self.valves = gis.valves
+    self.reservoirs = gis.reservoirs
+
+    initialize_map(self)
+
+    self.statusBar().showMessage(f"{open_file_path} loaded.")
