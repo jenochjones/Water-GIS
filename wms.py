@@ -13,14 +13,13 @@ def latlon_to_tile(lat, lon, zoom):
 
 # Function to calculate an appropriate zoom level based on bounding box size
 def calculate_zoom(lat_min, lon_min, lat_max, lon_max, max_zoom):
-    # The smaller the bounding box, the higher the zoom level
     num_tiles = 10
     lon_diff = abs(lon_max - lon_min)
-    zoom = max(0, min(max_zoom, int(math.floor((math.log(360 * num_tiles) - math.log(lon_diff)) / math.log(2)))))#zoom = int(min(max_zoom, max(0, (max_zoom - 1) - math.log2(max(lat_diff, lon_diff) + 1e-9))))  # Clamp between 0 and 19
+    zoom = max(0, min(max_zoom, int(math.floor((math.log(360 * num_tiles) - math.log(lon_diff)) / math.log(2)))))
     return zoom
 
-# Function to retrieve and combine tiles
-def get_wms_tiles(lat_min, lon_min, lat_max, lon_max, provider=xyz.USGS.USImagery):
+# Function to retrieve, combine tiles, and save as a single image
+def get_and_save_combined_image(lat_min, lon_min, lat_max, lon_max, filepath, provider=xyz.USGS.USImagery):
     # Calculate zoom level
     zoom = calculate_zoom(lat_min, lon_min, lat_max, lon_max, provider.max_zoom)
 
@@ -28,22 +27,41 @@ def get_wms_tiles(lat_min, lon_min, lat_max, lon_max, provider=xyz.USGS.USImager
     x_min, y_min = latlon_to_tile(lat_max, lon_min, zoom)
     x_max, y_max = latlon_to_tile(lat_min, lon_max, zoom)
 
-    # Fetch and combine tiles
-    tiles = []
+    # Tile dimensions
+    tile_width, tile_height = 256, 256
+
+    # Calculate dimensions of the final image
+    image_width = (x_max - x_min + 1) * tile_width
+    image_height = (y_max - y_min + 1) * tile_height
+
+    # Create a blank image to hold all tiles
+    combined_image = Image.new('RGB', (image_width, image_height))
+
+    # Fetch and paste tiles into the combined image
     for y in range(y_min, y_max + 1):
-        row = []
         for x in range(x_min, x_max + 1):
-            
             url = provider.build_url(x=x, y=y, z=zoom)
             response = requests.get(url)
             if response.status_code == 200:
                 tile = Image.open(BytesIO(response.content))
-                row.append(tile)
             else:
-                row.append(Image.new('RGB', (256, 256), (255, 255, 0)))  # Blank tile for failed requests
-            
-            print(f'{round(((((y - y_min) * (x_max - x_min)) + (x - x_min)) * 100) / ((y_max - y_min + 1) * (x_max - x_min + 1)), 1)}% Complete')
-        tiles.append(row)
+                tile = Image.new('RGB', (tile_width, tile_height), (255, 255, 0))  # Blank tile for failed requests
 
-    return tiles
+            # Calculate position to paste the tile
+            x_offset = (x - x_min) * tile_width
+            y_offset = (y - y_min) * tile_height
+            combined_image.paste(tile, (x_offset, y_offset))
 
+            # Progress update
+            progress = round(((((y - y_min) * (x_max - x_min + 1)) + (x - x_min + 1)) * 100) / ((y_max - y_min + 1) * (x_max - x_min + 1)), 1)
+            print(f"{progress}% Complete")
+
+    # Save the combined image as a JPEG file
+    combined_image.save(filepath, "JPEG")
+    print(f"Image saved to {filepath}")
+
+# Example usage
+lat_min, lon_min = 40.0, -112.0
+lat_max, lon_max = 41.0, -111.0
+filepath = "./img/combined_image.jpg"
+get_and_save_combined_image(lat_min, lon_min, lat_max, lon_max, filepath)
