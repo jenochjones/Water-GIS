@@ -9,6 +9,7 @@ def latlon_to_tile(lat, lon, zoom):
     n = 2 ** zoom
     x_tile = int((lon + 180.0) / 360.0 * n)
     y_tile = int((1.0 - math.log(math.tan(math.radians(lat)) + 1 / math.cos(math.radians(lat))) / math.pi) / 2.0 * n)
+
     return x_tile, y_tile
 
 # Function to calculate an appropriate zoom level based on bounding box size
@@ -41,6 +42,7 @@ def get_and_save_combined_image(lat_min, lon_min, lat_max, lon_max, filepath, pr
     for y in range(y_min, y_max + 1):
         for x in range(x_min, x_max + 1):
             url = provider.build_url(x=x, y=y, z=zoom)
+            print(url)
             response = requests.get(url)
             if response.status_code == 200:
                 tile = Image.open(BytesIO(response.content))

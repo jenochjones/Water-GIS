@@ -1,65 +1,95 @@
 import sys
 from PyQt5.QtWidgets import (
     QApplication, QMainWindow, QGraphicsView, QGraphicsScene,
-    QToolBar, QPushButton, QDockWidget, QVBoxLayout, QWidget,
-    QDialogButtonBox, QLineEdit, QLabel, QDialog, QSpacerItem, QSizePolicy
+    QToolBar, QPushButton, QGraphicsPixmapItem, QLabel, QStatusBar
 )
-from PyQt5.QtCore import Qt, QRectF, QSize
+from PyQt5.QtCore import Qt, QRectF, QSize, QPointF
 from PyQt5.QtGui import QPainter, QIcon, QPixmap
-from wms import get_wms_tiles
-#from PIL.Image import ImageQt
-from PIL import Image
-import ImageQt
+import xyzservices.providers as xyz
+import requests
+import math
+from io import BytesIO
 
-class PannableZoomableView(QGraphicsView):
-    def __init__(self, scene, main_window):
-        super().__init__(scene)
+
+def mercator_to_latlon(x, y):
+        lon = x * 180 / 20037508.34
+        lat = y * 180 / 20037508.34
+        lat = 180 / math.pi * (2 * math.atan(math.exp(lat * math.pi / 180)) - math.pi / 2)
+        return lat, lon
+
+
+class MapView(QGraphicsView):
+    def __init__(self, scene, status_label):
+        super().__init__()
+        self.scene = scene
+        self.status_label = status_label
+        self.setScene(self.scene)
+
+        self.tile_provider = xyz.USGS.USImagery
+        self.tile_size = 256
+        self.zoom_level = 0
+        self.tiles = {}
+
+        # Web Mercator limits in meters
+        self.coord_ext = {
+            'max_x': 20037508.342789244,
+            'min_x': -20037508.342789244,
+            'max_y': 20037508.342789244,
+            'min_y': -20037508.342789244
+        }
+
+        # Set the scene to match world extents
+        self.scene.setSceneRect(
+            self.coord_ext['min_x'],
+            self.coord_ext['min_y'],
+            self.coord_ext['max_x'],
+            self.coord_ext['max_y']
+        )
+
         self.setRenderHint(QPainter.Antialiasing)
         self.setDragMode(QGraphicsView.ScrollHandDrag)
-        self.zoom_factor = 1.15
-        self.main_window = main_window  # Reference to the main window
+        self.setTransformationAnchor(QGraphicsView.AnchorUnderMouse)
+        self.setMouseTracking(True)
 
-        # Initialize map-related properties
-        self.scene = scene
-        self.current_zoom = 2  # Default zoom level
-        self.update_map()
+        # Fit entire map into view
+        self.fitInView(self.scene.sceneRect(), Qt.KeepAspectRatio)
 
-    def update_map(self):
-        # Calculate the bounding box in lat/lon based on the scene rect
-        scene_rect = self.scene.sceneRect()
-        top_left = self.mapToScene(scene_rect.topLeft().toPoint())
-        bottom_right = self.mapToScene(scene_rect.bottomRight().toPoint())
 
-        lat_min = min(top_left.y(), bottom_right.y())
-        lat_max = max(top_left.y(), bottom_right.y())
-        lon_min = min(top_left.x(), bottom_right.x())
-        lon_max = max(top_left.x(), bottom_right.x())
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        self.update_scene_rect()
 
-        # Fetch WMS tiles using the bounding box
-        tiles = get_wms_tiles(lat_min, lon_min, lat_max, lon_max)
-        self.scene.clear()
+    def update_scene_rect(self):
+        """Update coordinate extents and scene rect based on the viewport size."""
+        self.window_ext = {
+            'width': self.viewport().width(),
+            'height': self.viewport().height()
+        }
 
-        # Display the tiles in the scene
-        tile_size = 256  # Pixels per tile
-        for row_idx, row in enumerate(tiles):
-            for col_idx, tile in enumerate(row):
-                qt_image = ImageQt(tile)
-                pixmap = QPixmap.fromImage(qt_image)
-                x_pos = col_idx * tile_size
-                y_pos = row_idx * tile_size
-                self.scene.addPixmap(pixmap).setPos(x_pos, y_pos)
+        self.set_y_ext()
 
-    def wheelEvent(self, event):
-        if event.angleDelta().y() > 0:
-            self.current_zoom = min(self.current_zoom + 1, 18)  # Limit max zoom
-        else:
-            self.current_zoom = max(self.current_zoom - 1, 1)  # Limit min zoom
+        # Set a rect centered at (0,0) with width and height proportional to Web Mercator extents
+        width = self.coord_ext['max_x'] - self.coord_ext['min_x']
+        height = self.coord_ext['max_y'] - self.coord_ext['min_y']
+        self.scene.setSceneRect(
+            self.coord_ext['min_x'], self.coord_ext['min_y'], width, height
+        )
 
-        self.update_map()
+    def set_y_ext(self):
+        x_tot = self.coord_ext['max_x'] - self.coord_ext['min_x']
+        y_tot = x_tot * self.window_ext['height'] / self.window_ext['width']
+        self.coord_ext['max_y'] = y_tot / 2
+        self.coord_ext['min_y'] = - y_tot / 2
 
-    def mouseReleaseEvent(self, event):
-        super().mouseReleaseEvent(event)
-        self.update_map()
+    
+
+    def mouseMoveEvent(self, event):
+        point = self.mapToScene(event.pos())
+        lat, lon = mercator_to_latlon(point.x(), point.y())
+        self.status_label.setText(f"Lat: {point.y():.2f}, Lon: {point.x():.2f}")
+        super().mouseMoveEvent(event)
+
+
 
 class MainWindow(QMainWindow):
     def __init__(self):
@@ -67,68 +97,39 @@ class MainWindow(QMainWindow):
         self.setWindowTitle("Map Viewer")
         self.resize(800, 600)
 
-        # Create the scene and view
-        scene = QGraphicsScene(self)
-        scene.setSceneRect(-180, -90, 360, 180)  # Approximate world bounds in lat/lon
-        view = PannableZoomableView(scene, self)
+        self.scene = QGraphicsScene(self)
+        self.status_label = QLabel("X: , Y: ")
+        self.statusBar = QStatusBar()
+        self.statusBar.addPermanentWidget(self.status_label)
+        self.setStatusBar(self.statusBar)
 
-        self.setCentralWidget(view)
+        self.MapView = MapView(self.scene, self.status_label)
+        self.setCentralWidget(self.MapView)
 
-        # Create toolbars and buttons
         self.create_toolbars()
 
     def create_toolbars(self):
-        # File toolbar
-        file_toolbar = QToolBar("File Toolbar", self)
-        self.addToolBar(file_toolbar)
+        toolbars = {
+            "File Toolbar": [("icons/new_proj.png", "Ctrl+N"),
+                             ("icons/open.png", "Ctrl+O"),
+                             ("icons/save.png", "Ctrl+S")],
+            "Run Toolbar": [("icons/crs.png", None),
+                            ("icons/run.png", "Ctrl+R")],
+            "Analysis Toolbar": [("icons/graph.png", None)],
+            "Draw Toolbar": [("icons/select.png", None),
+                             ("icons/add_node.png", None)],
+        }
 
-        new_file_btn = QPushButton(QIcon("icons/new_proj.png"), "", self)
-        new_file_btn.setIconSize(QSize(35, 35))
-        new_file_btn.setShortcut("Ctrl+N")
-        file_toolbar.addWidget(new_file_btn)
+        for name, buttons in toolbars.items():
+            toolbar = QToolBar(name, self)
+            self.addToolBar(toolbar)
+            for icon_path, shortcut in buttons:
+                btn = QPushButton(QIcon(icon_path), "", self)
+                btn.setIconSize(QSize(35, 35))
+                if shortcut:
+                    btn.setShortcut(shortcut)
+                toolbar.addWidget(btn)
 
-        open_btn = QPushButton(QIcon("icons/open.png"), "", self)
-        open_btn.setShortcut("Ctrl+O")
-        open_btn.setIconSize(QSize(35, 35))
-        file_toolbar.addWidget(open_btn)
-
-        save_btn = QPushButton(QIcon("icons/save.png"), "", self)
-        save_btn.setShortcut("Ctrl+S")
-        save_btn.setIconSize(QSize(35, 35))
-        file_toolbar.addWidget(save_btn)
-
-        # Run toolbar
-        run_toolbar = QToolBar("Run Toolbar", self)
-        self.addToolBar(run_toolbar)
-
-        set_crs_btn = QPushButton(QIcon("icons/crs.png"), "", self)
-        set_crs_btn.setIconSize(QSize(35, 35))
-        run_toolbar.addWidget(set_crs_btn)
-
-        run_model_btn = QPushButton(QIcon("icons/run.png"), "", self)
-        run_model_btn.setShortcut("Ctrl+R")
-        run_model_btn.setIconSize(QSize(35, 35))
-        run_toolbar.addWidget(run_model_btn)
-
-        # Analysis toolbar
-        analysis_toolbar = QToolBar("Analysis Toolbar", self)
-        self.addToolBar(analysis_toolbar)
-
-        graph_btn = QPushButton(QIcon("icons/graph.png"), "", self)
-        graph_btn.setIconSize(QSize(35, 35))
-        analysis_toolbar.addWidget(graph_btn)
-
-        # Draw toolbar
-        draw_toolbar = QToolBar("Draw Toolbar", self)
-        self.addToolBar(draw_toolbar)
-
-        select_btn = QPushButton(QIcon("icons/select.png"), "", self)
-        select_btn.setIconSize(QSize(35, 35))
-        draw_toolbar.addWidget(select_btn)
-
-        add_node_btn = QPushButton(QIcon("icons/add_node.png"), "", self)
-        add_node_btn.setIconSize(QSize(35, 35))
-        draw_toolbar.addWidget(add_node_btn)
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)
